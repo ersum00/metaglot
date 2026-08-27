@@ -7,8 +7,10 @@
  *
  * Usage:
  *   metaglot --channel=1
- *   metaglot --all                 # cron: hourly
- *   metaglot --channel=1 --dry-run # preview without writing
+ *   metaglot --all                              # cron: hourly
+ *   metaglot --channel=1 --dry-run              # preview without writing
+ *   metaglot channel:delete --channel=1         # show what deletion would remove
+ *   metaglot channel:delete --channel=1 --force # delete the channel and all stored data
  */
 
 use Metaglot\Auth\TokenProvider;
@@ -33,11 +35,66 @@ $logline = static function (string $msg): void {
     fwrite(STDERR, '[' . date('Y-m-d H:i:s') . '] ' . $msg . PHP_EOL);
 };
 
+$config = Config::fromEnv();
+$db     = new Database($config);
+
+$command = $argv[1] ?? '';
+
+if ($command === 'channel:delete') {
+    // getopt() stops at the first non-option argument (the subcommand),
+    // so the subcommand's options are parsed by hand.
+    $id    = 0;
+    $force = false;
+    foreach (array_slice($argv, 2) as $arg) {
+        if (str_starts_with($arg, '--channel=')) {
+            $id = (int) substr($arg, strlen('--channel='));
+        } elseif ($arg === '--force') {
+            $force = true;
+        }
+    }
+    if ($id === 0) {
+        $logline('channel:delete requires --channel=N.');
+        exit(1);
+    }
+
+    $st = $db->pdo()->prepare(
+        'SELECT label, (SELECT count(*) FROM videos v WHERE v.channel_id = c.id) AS video_count
+         FROM channels c WHERE c.id = :i'
+    );
+    $st->execute([':i' => $id]);
+    $row = $st->fetch();
+    if ($row === false) {
+        $logline("Channel $id not found.");
+        exit(1);
+    }
+
+    $label = (string) $row['label'];
+    $count = (int) $row['video_count'];
+
+    if (!$force) {
+        $logline(
+            "Would delete channel $id ($label): stored OAuth credentials, "
+            . "$count tracked videos and all quota history. Re-run with --force to confirm."
+        );
+        exit(0);
+    }
+
+    $db->pdo()->prepare('DELETE FROM channels WHERE id = :i')->execute([':i' => $id]);
+    $logline(
+        "Deleted channel $id ($label): stored OAuth credentials, "
+        . "$count tracked videos and all quota history."
+    );
+    exit(0);
+}
+
+if ($command !== '' && !str_starts_with($command, '--')) {
+    $logline("Unknown command: $command");
+    exit(1);
+}
+
 $opts   = getopt('', ['channel::', 'all', 'dry-run']);
 $dryRun = isset($opts['dry-run']);
 
-$config     = Config::fromEnv();
-$db         = new Database($config);
 $http       = new Http();
 $quota      = new QuotaMeter($db);
 $youtube    = new ApiClient($http, new TokenProvider($http), $quota, $db);
