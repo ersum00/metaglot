@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.2', '8.3', '8.4']
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: metaglot
+          POSTGRES_PASSWORD: metaglot
+          POSTGRES_DB: metaglot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U metaglot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP ${{ matrix.php }}
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: curl, mbstring, pdo, pdo_pgsql
+          coverage: pcov
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Coding standards
+        run: vendor/bin/php-cs-fixer fix --dry-run --diff
+
+      - name: Static analysis
+        run: vendor/bin/phpstan analyse --no-progress
+
+      - name: Tests (unit + PostgreSQL integration)
+        run: vendor/bin/phpunit --coverage-clover coverage.xml
+        env:
+          METAGLOT_TEST_PG_DSN: 'pgsql:host=127.0.0.1;port=5432;dbname=metaglot_test'
+          METAGLOT_TEST_PG_USER: metaglot
+          METAGLOT_TEST_PG_PASS: metaglot
+
+      - name: Upload coverage to Codecov
+        if: matrix.php == '8.4'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

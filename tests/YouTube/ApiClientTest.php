@@ -7,6 +7,7 @@ namespace Metaglot\Tests\YouTube;
 use Metaglot\Auth\TokenProvider;
 use Metaglot\Database;
 use Metaglot\Http;
+use Metaglot\Quota\QuotaExhaustedException;
 use Metaglot\Quota\QuotaMeter;
 use Metaglot\YouTube\ApiClient;
 use PHPUnit\Framework\TestCase;
@@ -123,5 +124,58 @@ final class ApiClientTest extends TestCase
         $this->client()->pushLocalizations(self::channel(), $video, self::localizations());
 
         $this->assertSame('en', $this->sentBody['snippet']['defaultLanguage']);
+    }
+
+    public function testExhaustedQuotaBlocksTheRequestBeforeAnyHttpCall(): void
+    {
+        // Quota exhaustion: the meter throws before a single byte goes out.
+        $http = $this->createMock(Http::class);
+        $http->expects($this->never())->method('request');
+
+        $quota = $this->createMock(QuotaMeter::class);
+        $quota->method('spend')->willThrowException(new QuotaExhaustedException('Daily quota exhausted'));
+
+        $client = new ApiClient(
+            $http,
+            $this->createMock(TokenProvider::class),
+            $quota,
+            $this->createMock(Database::class),
+        );
+
+        $video = [
+            'id'      => 'vid1',
+            'snippet' => ['title' => 'T', 'description' => 'D', 'categoryId' => '22'],
+        ];
+
+        $this->expectException(QuotaExhaustedException::class);
+        $client->pushLocalizations(self::channel(), $video, self::localizations());
+    }
+
+    public function testYouTubeQuotaRejectionRaisesQuotaExhausted(): void
+    {
+        // Even when the local meter allowed it, a quotaExceeded rejection from
+        // YouTube must surface as QuotaExhaustedException, not a generic error.
+        $http = $this->createMock(Http::class);
+        $http->method('request')->willReturn([403, [
+            'error' => ['errors' => [['reason' => 'quotaExceeded']]],
+        ]]);
+
+        $tokens = $this->createMock(TokenProvider::class);
+        $tokens->method('accessToken')->willReturn('test-token');
+
+        $client = new ApiClient(
+            $http,
+            $tokens,
+            $this->createMock(QuotaMeter::class),
+            $this->createMock(Database::class),
+        );
+
+        $video = [
+            'id'      => 'vid1',
+            'snippet' => ['title' => 'T', 'description' => 'D', 'categoryId' => '22'],
+        ];
+
+        $this->expectException(QuotaExhaustedException::class);
+        $client->pushLocalizations(self::channel(), $video, self::localizations());
     }
 }

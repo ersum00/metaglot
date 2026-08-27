@@ -1,5 +1,7 @@
 # metaglot
 
+[![codecov](https://codecov.io/gh/ersum00/metaglot/graph/badge.svg)](https://codecov.io/gh/ersum00/metaglot)
+
 Localizes video titles and descriptions into multiple languages so they can be **found by search** — SEO localization, not literal translation. Uses the YouTube Data API v3 to read and write metadata, and any OpenAI-compatible LLM endpoint (a local [Ollama](https://ollama.com) by default) to produce titles a native speaker of each target language would actually search for.
 
 > Early development. The CLI works; full documentation is on its way.

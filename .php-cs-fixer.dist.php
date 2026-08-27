@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 $finder = (new PhpCsFixer\Finder())
-    ->in(__DIR__ . '/src')
+    ->in([__DIR__ . '/src', __DIR__ . '/tests'])
     ->append([__FILE__, __DIR__ . '/bin/metaglot']);
 
 return (new PhpCsFixer\Config())

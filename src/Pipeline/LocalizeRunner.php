@@ -78,6 +78,10 @@ final class LocalizeRunner
             "UPDATE videos SET status='failed', last_error=:e, updated_at=now()
              WHERE channel_id=:c AND video_id=:v"
         );
+        $partial = $this->db->pdo()->prepare(
+            "UPDATE videos SET status='pending', localized_langs=:l, last_error=:e, updated_at=now()
+             WHERE channel_id=:c AND video_id=:v"
+        );
 
         foreach ($videos as $vid => $video) {
             $snip = $video['snippet'];
@@ -128,8 +132,25 @@ final class LocalizeRunner
                 }
 
                 $this->youtube->pushLocalizations($channel, $video, $merged);
-                $done->execute([':c' => $channel['id'], ':v' => $vid, ':l' => self::toPgArray(array_keys($merged))]);
-                ($this->log)("  ✓ $vid (+" . count($new) . ' languages)');
+
+                $stillMissing = array_values(array_diff($missing, array_keys($new)));
+                if ($stillMissing === []) {
+                    $done->execute([':c' => $channel['id'], ':v' => $vid, ':l' => self::toPgArray(array_keys($merged))]);
+                    ($this->log)("  ✓ $vid (+" . count($new) . ' languages)');
+                } else {
+                    // Partial success: what arrived was pushed, but the video
+                    // stays 'pending' (retryable), NOT 'failed', so the
+                    // remaining languages are attempted again on the next run.
+                    $partial->execute([
+                        ':c' => $channel['id'], ':v' => $vid,
+                        ':l' => self::toPgArray(array_keys($merged)),
+                        ':e' => 'partial: still missing ' . implode(',', $stillMissing),
+                    ]);
+                    ($this->log)(
+                        "  ~ $vid (+" . count($new) . ' languages, still missing: '
+                        . implode(',', $stillMissing) . ')'
+                    );
+                }
             } catch (QuotaExhaustedException $e) {
                 throw $e; // bubble up — the worker must stop
             } catch (Throwable $e) {

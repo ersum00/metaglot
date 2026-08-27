@@ -9,6 +9,7 @@ use Metaglot\Http;
 use Metaglot\Translate\OpenAiCompatible;
 use Metaglot\Translate\PromptBuilder;
 use PHPUnit\Framework\TestCase;
+use RuntimeException;
 
 final class OpenAiCompatibleTest extends TestCase
 {
@@ -49,5 +50,51 @@ final class OpenAiCompatibleTest extends TestCase
 
         $this->assertSame('Short', $result['en']['title']);
         $this->assertSame('Fine', $result['en']['description']);
+    }
+
+    public function testBrokenJsonFromLlmRaises(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('LLM did not return valid JSON.');
+
+        $this->translator('this is {{ not json')->localize('Title', 'Desc', 'tr', ['en']);
+    }
+
+    public function testFencedJsonIsUnwrapped(): void
+    {
+        // Some models wrap their answer in a markdown code fence despite
+        // response_format json_object — the fence must be stripped.
+        $content = "```json\n"
+            . json_encode(['en' => ['title' => 'Fenced', 'description' => 'Body']])
+            . "\n```";
+
+        $result = $this->translator($content)->localize('Title', 'Desc', 'tr', ['en']);
+
+        $this->assertSame('Fenced', $result['en']['title']);
+    }
+
+    public function testNon200ResponseRaises(): void
+    {
+        $http = $this->createMock(Http::class);
+        $http->method('request')->willReturn([500, ['error' => 'boom']]);
+
+        $config     = new Config('dsn', 'user', 'pass', 'http://llm.test', 'test-model', '');
+        $translator = new OpenAiCompatible($http, new PromptBuilder(), $config);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('LLM request failed (500)');
+
+        $translator->localize('Title', 'Desc', 'tr', ['en']);
+    }
+
+    public function testLanguagesTheLlmSkippedAreOmittedNotInvented(): void
+    {
+        // Partial answer: only what the LLM actually produced is returned;
+        // the pipeline decides how to handle the missing languages.
+        $content = (string) json_encode(['en' => ['title' => 'Only English', 'description' => 'D']]);
+
+        $result = $this->translator($content)->localize('Title', 'Desc', 'tr', ['en', 'es', 'fr']);
+
+        $this->assertSame(['en'], array_keys($result));
     }
 }
