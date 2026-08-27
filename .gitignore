@@ -1,5 +1,8 @@
-﻿.env
+.env
 vendor/
 *.log
 *.dump
+.DS_Store
 PROJECT_BRIEF.md
+.php-cs-fixer.cache
+.phpunit.cache/

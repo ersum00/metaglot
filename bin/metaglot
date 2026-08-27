@@ -1,0 +1,72 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * metaglot — search-aware localization of video titles and descriptions.
+ * Uses the YouTube Data API v3; quota accounting lives in PostgreSQL.
+ *
+ * Usage:
+ *   metaglot --channel=1
+ *   metaglot --all                 # cron: hourly
+ *   metaglot --channel=1 --dry-run # preview without writing
+ */
+
+use Metaglot\Auth\TokenProvider;
+use Metaglot\Config;
+use Metaglot\Database;
+use Metaglot\Http;
+use Metaglot\Pipeline\LocalizeRunner;
+use Metaglot\Quota\QuotaExhaustedException;
+use Metaglot\Quota\QuotaMeter;
+use Metaglot\Translate\OpenAiCompatible;
+use Metaglot\Translate\PromptBuilder;
+use Metaglot\YouTube\ApiClient;
+
+foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/../../../autoload.php'] as $autoload) {
+    if (is_file($autoload)) {
+        require $autoload;
+        break;
+    }
+}
+
+$logline = static function (string $msg): void {
+    fwrite(STDERR, '[' . date('Y-m-d H:i:s') . '] ' . $msg . PHP_EOL);
+};
+
+$opts   = getopt('', ['channel::', 'all', 'dry-run']);
+$dryRun = isset($opts['dry-run']);
+
+$config     = Config::fromEnv();
+$db         = new Database($config);
+$http       = new Http();
+$quota      = new QuotaMeter($db);
+$youtube    = new ApiClient($http, new TokenProvider($http), $quota, $db);
+$translator = new OpenAiCompatible($http, new PromptBuilder(), $config);
+$runner     = new LocalizeRunner($db, $youtube, $translator, $quota);
+
+$sql = isset($opts['all'])
+    ? 'SELECT * FROM channels WHERE active ORDER BY id'
+    : 'SELECT * FROM channels WHERE id = :i';
+
+$st = $db->pdo()->prepare($sql);
+$st->execute(isset($opts['all']) ? [] : [':i' => (int) ($opts['channel'] ?? 0)]);
+$channels = $st->fetchAll();
+
+if ($channels === []) {
+    $logline('No channels to process. Use --channel=N or --all.');
+    exit(1);
+}
+
+$exit = 0;
+foreach ($channels as $channel) {
+    try {
+        $runner->run($channel, $dryRun);
+    } catch (QuotaExhaustedException $e) {
+        $logline('QUOTA: ' . $e->getMessage());
+    } catch (Throwable $e) {
+        $logline('ERROR (' . $channel['label'] . '): ' . $e->getMessage());
+        $exit = 1;
+    }
+}
+
+exit($exit);
