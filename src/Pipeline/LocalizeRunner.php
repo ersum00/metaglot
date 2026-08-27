@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Metaglot\Pipeline;
 
+use Closure;
 use Metaglot\Database;
 use Metaglot\Quota\QuotaExhaustedException;
 use Metaglot\Quota\QuotaMeter;
@@ -16,15 +17,29 @@ use Throwable;
  * End-to-end run for one channel: fetch recent videos, localize the missing
  * languages, push the result back to YouTube, and record progress in
  * PostgreSQL.
+ *
+ * Idempotency contract: a video is never processed twice. When the source
+ * title/description hash is unchanged and every target language is already
+ * present, no LLM call and no YouTube write happens for that video.
  */
 final class LocalizeRunner
 {
+    /** @var Closure(string): void */
+    private readonly Closure $log;
+
+    /**
+     * @param (Closure(string): void)|null $log progress logger; defaults to STDERR
+     */
     public function __construct(
         private readonly Database $db,
         private readonly ApiClient $youtube,
         private readonly TranslatorInterface $translator,
         private readonly QuotaMeter $quota,
+        ?Closure $log = null,
     ) {
+        $this->log = $log ?? static function (string $message): void {
+            fwrite(STDERR, '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL);
+        };
     }
 
     /**
@@ -33,7 +48,7 @@ final class LocalizeRunner
     public function run(array $channel, bool $dryRun): void
     {
         $label = (string) $channel['label'];
-        $this->log(sprintf(
+        ($this->log)(sprintf(
             'Channel: %s (quota used: %d/%d)',
             $label,
             $this->quota->usedToday((int) $channel['id']),
@@ -77,13 +92,17 @@ final class LocalizeRunner
             $row = $upsert->fetch();
 
             if (($row['status'] ?? 'pending') === 'done') {
-                continue; // source unchanged — skip
+                // Idempotency: source hash unchanged and every target language
+                // was already written — nothing to do, no API calls.
+                continue;
             }
 
             // Do not rewrite languages that already exist on YouTube.
             $existing = array_keys($video['localizations'] ?? []);
             $missing  = array_values(array_diff($langs, $existing));
             if ($missing === []) {
+                // Idempotency: all target languages already present — record it
+                // locally, never call the LLM or videos.update.
                 $done->execute([':c' => $channel['id'], ':v' => $vid, ':l' => self::toPgArray($existing)]);
                 continue;
             }
@@ -101,28 +120,23 @@ final class LocalizeRunner
                 $merged = ($video['localizations'] ?? []) + $new;
 
                 if ($dryRun) {
-                    $this->log("  [dry] $vid → " . implode(',', array_keys($new)));
+                    ($this->log)("  [dry] $vid → " . implode(',', array_keys($new)));
                     foreach ($new as $lang => $loc) {
-                        $this->log("        $lang: {$loc['title']}");
+                        ($this->log)("        $lang: {$loc['title']}");
                     }
                     continue;
                 }
 
                 $this->youtube->pushLocalizations($channel, $video, $merged);
                 $done->execute([':c' => $channel['id'], ':v' => $vid, ':l' => self::toPgArray(array_keys($merged))]);
-                $this->log("  ✓ $vid (+" . count($new) . ' languages)');
+                ($this->log)("  ✓ $vid (+" . count($new) . ' languages)');
             } catch (QuotaExhaustedException $e) {
                 throw $e; // bubble up — the worker must stop
             } catch (Throwable $e) {
                 $fail->execute([':c' => $channel['id'], ':v' => $vid, ':e' => $e->getMessage()]);
-                $this->log("  ✗ $vid: " . $e->getMessage());
+                ($this->log)("  ✗ $vid: " . $e->getMessage());
             }
         }
-    }
-
-    private function log(string $message): void
-    {
-        fwrite(STDERR, '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL);
     }
 
     /**

@@ -16,7 +16,7 @@ use RuntimeException;
  * When setting up a client, have the consent screen switched to
  * "In production".
  */
-final class TokenProvider
+class TokenProvider
 {
     private const OAUTH_URL = 'https://oauth2.googleapis.com/token';
 

@@ -15,7 +15,7 @@ use RuntimeException;
  * Minimal YouTube Data API v3 client covering channels.list,
  * playlistItems.list, videos.list and videos.update.
  */
-final class ApiClient
+class ApiClient
 {
     private const API = 'https://www.googleapis.com/youtube/v3';
 
@@ -155,7 +155,9 @@ final class ApiClient
                 'description'     => $snippet['description'],
                 'categoryId'      => $snippet['categoryId'],
                 'tags'            => $snippet['tags'] ?? [],
-                'defaultLanguage' => $snippet['defaultLanguage'] ?? $channel['source_lang'],
+                'defaultLanguage' => ($snippet['defaultLanguage'] ?? '') !== ''
+                    ? $snippet['defaultLanguage']
+                    : $channel['source_lang'],
             ],
             'localizations' => $localizations,
         ];

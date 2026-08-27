@@ -9,7 +9,7 @@ use PDO;
 /**
  * Lazily opened PDO connection, shared for the lifetime of the process.
  */
-final class Database
+class Database
 {
     private ?PDO $pdo = null;
 
