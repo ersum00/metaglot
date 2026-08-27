@@ -1,0 +1,5 @@
+﻿.env
+vendor/
+*.log
+*.dump
+PROJECT_BRIEF.md
