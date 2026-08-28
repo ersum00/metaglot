@@ -27,8 +27,12 @@ final class LocalizeRunner
     /** @var Closure(string): void */
     private readonly Closure $log;
 
+    /** @var Closure(string): void */
+    private readonly Closure $print;
+
     /**
-     * @param (Closure(string): void)|null $log progress logger; defaults to STDERR
+     * @param (Closure(string): void)|null $log   progress logger; defaults to STDERR with a timestamp
+     * @param (Closure(string): void)|null $print dry-run preview writer; defaults to STDOUT, no timestamp
      */
     public function __construct(
         private readonly Database $db,
@@ -36,9 +40,13 @@ final class LocalizeRunner
         private readonly TranslatorInterface $translator,
         private readonly QuotaMeter $quota,
         ?Closure $log = null,
+        ?Closure $print = null,
     ) {
         $this->log = $log ?? static function (string $message): void {
             fwrite(STDERR, '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL);
+        };
+        $this->print = $print ?? static function (string $line): void {
+            fwrite(STDOUT, $line . PHP_EOL);
         };
     }
 
@@ -124,9 +132,12 @@ final class LocalizeRunner
                 $merged = ($video['localizations'] ?? []) + $new;
 
                 if ($dryRun) {
-                    ($this->log)("  [dry] $vid → " . implode(',', array_keys($new)));
+                    // The preview is plain output (STDOUT, no timestamp) so it
+                    // can be captured on its own; progress stays on the logger.
+                    ($this->print)(sprintf('[dry] %s  "%s"', $vid, (string) $snip['title']));
+                    $width = max(array_map('strlen', array_keys($new)));
                     foreach ($new as $lang => $loc) {
-                        ($this->log)("        $lang: {$loc['title']}");
+                        ($this->print)(sprintf('      %-' . $width . 's  %s', $lang, (string) $loc['title']));
                     }
                     continue;
                 }

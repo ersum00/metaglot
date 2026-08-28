@@ -14,15 +14,13 @@
 
 Literal translation misses the point. A word-for-word rendering of "İstanbul'da gezilecek yerler" is not what an English speaker types into the search box — *"best things to do in Istanbul"* is. metaglot prompts the LLM for the phrasing a native speaker would search for; [docs/PROMPTING.md](docs/PROMPTING.md) explains how and how to tune it for your niche.
 
-Here is a real dry run against a test channel whose source title is *"İstanbul'da Bir Günde Gezilecek 7 Yer | Yerel Rehber Tavsiyeleri"* — three target languages, `qwen2.5:7b-instruct` on a local Ollama. `--dry-run` prints what would be written without touching anything:
+Here is real output from a `--dry-run` on a live channel — model `openai/gpt-oss-120b` via [Groq](https://groq.com). A dry run prints what would be written without touching anything:
 
-```console
-$ php bin/metaglot --channel=1 --dry-run
-[2026-08-27 15:03:17] Channel: test-channel (quota used: 0/10000)
-[2026-08-27 15:03:28]   [dry] aZk3yTest01 → en,es,de
-[2026-08-27 15:03:28]         en: 7 Places to See in Istanbul in One Day | Local Guide Tips
-[2026-08-27 15:03:28]         es: 7 Lugares para Visitar en un Día en Estambul | Consejos de un Guía Local
-[2026-08-27 15:03:28]         de: 7 Orte in Istanbul in einem Tag zu Besuchen | Empfehlungen des Lokalen Reiseführers
+```text
+[dry] 4FwHvADwexE  "72 yaşında gerçek Fenerbahçelileri heyecanlandıran büyük BAŞKAN iyi ki varsın!"
+      en  72-year-old Fenerbahçe President thrills fans – thank you!
+      es  ¡Presidente de 72 años que emociona a los fans de Fenerbahçe – gracias!
+      de  72-jähriger Fenerbahçe-Präsident begeistert Fans – danke!
 ```
 
 ## How it works
@@ -60,6 +58,8 @@ Progress lives in your own PostgreSQL. Runs are **idempotent**: when a video's s
 
 The quota day resets at midnight **Pacific time**. metaglot meters every call in PostgreSQL before it happens: it warns when a channel reaches 90% of its daily limit and refuses to start any call that would cross 100% — a runaway loop cannot burn your quota.
 
+**Verified quota cost.** A real two-video run against a live channel consumed **108 units** in total. A second, identical run consumed **2 more** — the list calls only, no updates — confirming that already-localized videos are skipped and runs are idempotent.
+
 ## Requirements
 
 - PHP >= 8.2 with the `pdo_pgsql`, `curl` and `mbstring` extensions, plus [Composer](https://getcomposer.org)
@@ -95,7 +95,7 @@ VALUES ('my-channel', '<refresh-token>', '<client-id>', '<client-secret>',
 
 ## Usage
 
-Always start with a dry run — it prints every title it would write without touching anything:
+Always start with a dry run — it prints every title it would write without touching anything. The preview goes to stdout and everything else (progress, errors) to stderr, so `--dry-run > preview.txt` captures just the titles:
 
 ```sh
 php bin/metaglot --channel=1 --dry-run
@@ -130,6 +130,8 @@ ollama pull qwen2.5:14b-instruct
 ```
 
 With Ollama running, metaglot works with no LLM configuration at all (default endpoint `http://127.0.0.1:11434/v1/chat/completions`).
+
+A 7B model in local Ollama needs roughly 6–8 GB of RAM, which most small VPS instances lack. On a constrained host, point `LLM_ENDPOINT` at a hosted OpenAI-compatible API instead — [Groq](https://groq.com)'s free tier works and needs no card.
 
 Any **OpenAI-compatible** chat completions endpoint works instead — set three environment variables:
 

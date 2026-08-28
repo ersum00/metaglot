@@ -164,6 +164,81 @@ final class LocalizeRunnerTest extends TestCase
         $this->runner($db, $youtube, $translator)->run(self::channel(), false);
     }
 
+    public function testDryRunPrintsPreviewWithoutTimestampsAndWritesNothing(): void
+    {
+        // The preview format is what the README documents: source title after
+        // the id, one "code  title" line per language, no timestamp prefix.
+        $youtube = $this->youtube(self::video());
+        $youtube->expects($this->never())->method('pushLocalizations');
+
+        $translator = $this->createMock(TranslatorInterface::class);
+        $translator->method('localize')->willReturn([
+            'en' => ['title' => 'Title in English', 'description' => 'b'],
+            'es' => ['title' => 'Título en español', 'description' => 'd'],
+        ]);
+
+        $db = $this->database(['status' => 'pending', 'localized_langs' => '{}']);
+        $this->doneStmt->expects($this->never())->method('execute');
+        $this->partialStmt->expects($this->never())->method('execute');
+        $this->failStmt->expects($this->never())->method('execute');
+
+        $logged  = [];
+        $printed = [];
+        $runner  = new LocalizeRunner(
+            $db,
+            $youtube,
+            $translator,
+            $this->quota(),
+            static function (string $message) use (&$logged): void {
+                $logged[] = $message;
+            },
+            static function (string $line) use (&$printed): void {
+                $printed[] = $line;
+            },
+        );
+        $runner->run(self::channel(), true);
+
+        $this->assertSame([
+            '[dry] vid1  "Title"',
+            '      en  Title in English',
+            '      es  Título en español',
+        ], $printed);
+
+        // Only the channel header went through the (timestamped) logger.
+        $this->assertCount(1, $logged);
+        $this->assertStringStartsWith('Channel: acme', $logged[0]);
+    }
+
+    public function testDryRunAlignsTitlesWhenLanguageCodesDifferInLength(): void
+    {
+        $youtube    = $this->youtube(self::video());
+        $translator = $this->createMock(TranslatorInterface::class);
+        $translator->method('localize')->willReturn([
+            'en'    => ['title' => 'English', 'description' => 'b'],
+            'pt-BR' => ['title' => 'Português', 'description' => 'd'],
+        ]);
+
+        $printed = [];
+        $runner  = new LocalizeRunner(
+            $this->database(['status' => 'pending', 'localized_langs' => '{}']),
+            $youtube,
+            $translator,
+            $this->quota(),
+            static function (string $message): void {
+            },
+            static function (string $line) use (&$printed): void {
+                $printed[] = $line;
+            },
+        );
+        $runner->run(['target_langs' => '{en,pt-BR}'] + self::channel(), true);
+
+        $this->assertSame([
+            '[dry] vid1  "Title"',
+            '      en     English',
+            '      pt-BR  Português',
+        ], $printed);
+    }
+
     public function testQuotaExhaustionStopsTheWorkerWithoutMarkingVideoFailed(): void
     {
         // Quota exhaustion must bubble up so the worker stops; the video must
