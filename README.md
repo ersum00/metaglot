@@ -1,7 +1,6 @@
 # metaglot
 
 [![CI](https://github.com/ersum00/metaglot/actions/workflows/ci.yml/badge.svg)](https://github.com/ersum00/metaglot/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/ersum00/metaglot/graph/badge.svg)](https://codecov.io/gh/ersum00/metaglot)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![PHP >= 8.2](https://img.shields.io/badge/php-%3E%3D%208.2-777bb4.svg)](composer.json)
 
@@ -14,6 +13,17 @@
 - The economics make it worth automating: **one `videos.update` call carries all target languages at once.** Localizing a video into 10 languages costs the same 50 quota units as changing its title once.
 
 Literal translation misses the point. A word-for-word rendering of "İstanbul'da gezilecek yerler" is not what an English speaker types into the search box — *"best things to do in Istanbul"* is. metaglot prompts the LLM for the phrasing a native speaker would search for; [docs/PROMPTING.md](docs/PROMPTING.md) explains how and how to tune it for your niche.
+
+Here is a real dry run against a test channel whose source title is *"İstanbul'da Bir Günde Gezilecek 7 Yer | Yerel Rehber Tavsiyeleri"* — three target languages, `qwen2.5:7b-instruct` on a local Ollama. `--dry-run` prints what would be written without touching anything:
+
+```console
+$ php bin/metaglot --channel=1 --dry-run
+[2026-08-27 15:03:17] Channel: test-channel (quota used: 0/10000)
+[2026-08-27 15:03:28]   [dry] aZk3yTest01 → en,es,de
+[2026-08-27 15:03:28]         en: 7 Places to See in Istanbul in One Day | Local Guide Tips
+[2026-08-27 15:03:28]         es: 7 Lugares para Visitar en un Día en Estambul | Consejos de un Guía Local
+[2026-08-27 15:03:28]         de: 7 Orte in Istanbul in einem Tag zu Besuchen | Empfehlungen des Lokalen Reiseführers
+```
 
 ## How it works
 
@@ -50,6 +60,12 @@ Progress lives in your own PostgreSQL. Runs are **idempotent**: when a video's s
 
 The quota day resets at midnight **Pacific time**. metaglot meters every call in PostgreSQL before it happens: it warns when a channel reaches 90% of its daily limit and refuses to start any call that would cross 100% — a runaway loop cannot burn your quota.
 
+## Requirements
+
+- PHP >= 8.2 with the `pdo_pgsql`, `curl` and `mbstring` extensions, plus [Composer](https://getcomposer.org)
+- PostgreSQL 12 or newer (CI tests against 16)
+- An OpenAI-compatible LLM endpoint — a local [Ollama](https://ollama.com) is the default (see [Translation provider](#translation-provider))
+
 ## Setup
 
 Short version — the full click-by-click walkthrough is in [docs/SETUP.md](docs/SETUP.md).
@@ -72,6 +88,10 @@ INSERT INTO channels (label, refresh_token, client_id, client_secret, source_lan
 VALUES ('my-channel', '<refresh-token>', '<client-id>', '<client-secret>',
         'tr', '{en,es,ar,de,fr,pt,hi,id,ja,ru}');
 ```
+
+### Language codes
+
+`source_lang` and `target_langs` use the same [BCP-47](https://www.rfc-editor.org/info/bcp47) codes YouTube uses everywhere else: a lowercase language subtag (`en`, `es`, `ar`), optionally narrowed by a script or region subtag where audiences genuinely diverge — `pt-BR` vs `pt-PT`, `zh-Hans` vs `zh-Hant`, `es-419` for Latin-American Spanish. A localization keyed `pt-BR` is shown to viewers whose interface is set to Brazilian Portuguese; a plain `pt` covers both Portugals until you need to split them. Only add a regional variant when the phrasing actually differs — every code in the list costs LLM output and shows up as a separate row to maintain. The authoritative list of codes YouTube accepts comes from its [`i18nLanguages` endpoint](https://developers.google.com/youtube/v3/docs/i18nLanguages/list). In the PostgreSQL array literal, codes are comma-separated without spaces: `'{en,es,pt-BR,zh-Hans}'`.
 
 ## Usage
 
@@ -118,6 +138,17 @@ LLM_ENDPOINT=https://api.openai.com/v1/chat/completions
 LLM_MODEL=gpt-4o-mini
 LLM_KEY=<your key>
 ```
+
+## What metaglot does not do
+
+Knowing the boundaries saves you a wrong assumption later:
+
+- **It never rewrites the original.** The source title and description are sent back byte-identical; metaglot only adds `localizations` entries next to them.
+- **It does not translate subtitles or captions.** Localized metadata gets the video found; the viewing experience is a separate problem.
+- **It does not localize tags or thumbnails** — the API has no per-language variant of either.
+- **It does not create, upload or schedule videos.** It only updates metadata on videos that already exist.
+- **It does not pick your target languages.** There is no analytics integration deciding what is worth localizing; you configure the list per channel.
+- **It is not a hosted service.** There is no server, no account and no telemetry — your database, your credentials, your LLM endpoint.
 
 ## Known pitfalls
 
