@@ -1,0 +1,49 @@
+# metaglot — "app" is a cron-invoked one-shot CLI, "db" is its PostgreSQL.
+#
+#   docker compose build
+#   docker compose up -d db
+#   docker compose run --rm app --channel=1 --dry-run
+#
+# Neither service publishes a port: the app is not a daemon and the database
+# must never be reachable from the host or the internet. See docs/DEPLOY.md.
+
+services:
+  app:
+    build: .
+    image: metaglot
+    env_file: .env
+    environment:
+      # Container-aware defaults; any value set in .env wins.
+      PG_DSN: ${PG_DSN:-pgsql:host=db;dbname=metaglot}
+      PG_USER: ${PG_USER:-metaglot}
+      PG_PASS: ${PG_PASS:?set PG_PASS in .env}
+      LLM_ENDPOINT: ${LLM_ENDPOINT:-http://host.docker.internal:11434/v1/chat/completions}
+    extra_hosts:
+      # Lets the container reach an Ollama running on the host (Linux needs this;
+      # Docker Desktop provides the name on its own).
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: metaglot
+      POSTGRES_USER: ${PG_USER:-metaglot}
+      POSTGRES_PASSWORD: ${PG_PASS:?set PG_PASS in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Applied automatically the first time the volume is initialised;
+      # for an existing volume use the psql command in docs/DEPLOY.md.
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-metaglot} -d metaglot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:

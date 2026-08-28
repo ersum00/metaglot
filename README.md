@@ -68,7 +68,7 @@ The quota day resets at midnight **Pacific time**. metaglot meters every call in
 
 ## Setup
 
-Short version — the full click-by-click walkthrough is in [docs/SETUP.md](docs/SETUP.md).
+Short version — the full click-by-click walkthrough is in [docs/SETUP.md](docs/SETUP.md). Prefer containers? [docs/DEPLOY.md](docs/DEPLOY.md) covers the Docker Compose deployment.
 
 1. Create a project at [console.cloud.google.com](https://console.cloud.google.com) and enable the **YouTube Data API v3** (APIs & Services → Library).
 2. Configure the OAuth consent screen with the `https://www.googleapis.com/auth/youtube.force-ssl` scope — and **publish it ("In production")**, not "Testing". See [pitfall 3](#3-refresh-tokens-die-after-7-days-while-the-consent-screen-is-in-testing).

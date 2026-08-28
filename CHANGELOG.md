@@ -32,3 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   php-cs-fixer, PHPStan (level 6) and a PostgreSQL service container.
 - Documentation: README, Google Cloud setup guide (`docs/SETUP.md`), prompt tuning
   guide (`docs/PROMPTING.md`) and this changelog.
+- Docker deployment: `Dockerfile` (php:8.3-cli-alpine, non-root, production
+  dependencies only), `docker-compose.yml` with a one-shot `app` service and a
+  private `postgres:16-alpine` service, and `docs/DEPLOY.md`.

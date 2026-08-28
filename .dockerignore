@@ -1,0 +1,12 @@
+vendor/
+.git
+.env
+tests/
+docs/
+.github/
+.phpunit.cache/
+.php-cs-fixer.cache
+coverage.xml
+*.log
+*.dump
+PROJECT_BRIEF.md
